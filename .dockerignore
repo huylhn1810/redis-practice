@@ -1,0 +1,11 @@
+migrations
+frontend
+mysql_data
+redis_data
+flyway_data
+.git
+.gitignore
+.env
+.env.*
+docs
+*.md

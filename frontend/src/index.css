@@ -1,0 +1,32 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    background-color: #131211;
+    color: #d8d4cb;
+    font-family: Inter, system-ui, sans-serif;
+  }
+
+  h1, h2, h3, .font-serif-headline {
+    font-family: 'Cormorant Garamond', Garamond, Georgia, serif;
+    letter-spacing: -0.03em;
+  }
+}
+
+/* Custom minimal scrollbar for obsidian/code log window */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0e0d0c;
+}
+::-webkit-scrollbar-thumb {
+  background: #2d2a26;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #66635c;
+}

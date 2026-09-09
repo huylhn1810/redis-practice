@@ -1,0 +1,106 @@
+services:
+  # Caching
+  redis:
+    image: redis:7-alpine
+
+    container_name: redis-practice-caching
+
+    restart: unless-stopped
+
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries:  20
+      start_period: 10s
+
+    ports:
+      - "${REDIS_PORT}:6379"
+
+    command: redis-server --appendonly yes
+
+    volumes:
+      - ./redis_data:/data
+
+
+  # Database
+  db:
+    image: mysql:8.0.44
+
+    container_name: redis-practice-database
+
+    restart: unless-stopped
+
+    env_file:
+      - .env
+
+    healthcheck:  
+      # Use CMD-SHELL to execute the mysqladmin ping command to check if the MySQL server is responsive.
+      # Use $$ to container runtime variable in docker-compose.yml, as $ is a special character in YAML and needs to be escaped.
+      test: ["CMD-SHELL", "mysql -uroot -p$${MYSQL_ROOT_PASSWORD} -e 'SELECT 1'"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+
+    ports:
+      - "${DB_PORT}:3306"
+
+    volumes:
+      - ./mysql_data:/var/lib/mysql
+
+  # Migrate
+  migrate:
+    image: flyway/flyway
+
+    environment:
+      FLYWAY_URL: ${FLYWAY_URL}
+      FLYWAY_SCHEMAS: ${FLYWAY_SCHEMAS}
+      FLYWAY_USER: ${FLYWAY_USER}
+      FLYWAY_PASSWORD: ${FLYWAY_PASSWORD}
+      FLYWAY_CONNECT_RETRIES: ${FLYWAY_CONNECT_RETRIES}
+      FLYWAY_LOCATIONS: ${FLYWAY_LOCATIONS}
+
+    command: migrate
+
+    volumes:
+      - ./migrations:/flyway/sql
+
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+
+    container_name: redis-practice-frontend
+
+    restart: unless-stopped
+
+    ports:
+      - "3000:5173"
+
+  # Backend
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    container_name: redis-practice-backend
+
+    restart: unless-stopped
+
+    env_file:
+      - .env
+
+    ports: 
+      - "${SERVER_PORT}:8080"
+
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy

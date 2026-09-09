@@ -1,0 +1,33 @@
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Runtime data
+redis_data/
+mysql_data/
+flyway_data/
+
+# Dependencies
+node_modules/
+vendor/
+
+# Generated frontend and backend output
+dist/
+build/
+bin/
+/api
+/api.exe
+*.test
+*.out
+coverage/
+coverage.*
+
+# Logs
+*.log
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
