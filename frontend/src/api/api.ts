@@ -1,5 +1,5 @@
 import axios from 'axios'
-import { BackendConfig, Metrics, Product } from '../types'
+import { BackendConfig, Metrics, Product, RateLimitProbeResult } from '../types'
 
 const apiClient = axios.create({
   baseURL: '/api/v1',
@@ -35,7 +35,7 @@ export const api = {
       cache_hits,
       cache_misses,
       db_queries,
-      redis_errors: 0,
+      redis_errors: Number(raw.redis_error ?? 0),
     }
   },
 
@@ -48,19 +48,63 @@ export const api = {
       negative_cache: Boolean(cfg.negative_cache),
       invalidation_update: Boolean(cfg.invalidation_update),
       stampede_protection: Boolean(cfg.stampede_protection),
+      rate_limit_max_requests: Number(cfg.rate_limit_max_requests ?? 10),
+      rate_limit_window_seconds: Number(cfg.rate_limit_window_seconds ?? 10),
     }
   },
 
   // Products API (Database)
-  async getProduct(id: number, cacheBuster?: string | number): Promise<{ product?: Product; error?: string; status: number }> {
+  async getProduct(
+    id: number,
+    cacheBuster?: string | number
+  ): Promise<{ product?: Product; error?: string; status: number }> {
     try {
       const url = cacheBuster !== undefined ? `/products/${id}?_cb=${cacheBuster}` : `/products/${id}`
       const res = await apiClient.get(url)
       return { product: res.data?.data?.product, status: res.status }
     } catch (err: any) {
       return {
-        error: err.response?.data?.data?.message || err.message || 'Product not found',
+        error:
+          err.response?.data?.message ||
+          err.response?.data?.data?.message ||
+          err.message ||
+          'Product not found',
         status: err.response?.status || 500,
+      }
+    }
+  },
+
+  async sendRateLimitProbe(clientID: string): Promise<RateLimitProbeResult> {
+    try {
+      const res = await apiClient.post(
+        '/demo/ratelimit',
+        {},
+        {
+          headers: {
+            'X-Demo-Client-ID': clientID,
+          },
+        }
+      )
+      return {
+        status: res.status,
+        message: 'Request allowed by Redis rate limiter',
+        decision: res.data?.data?.rate_limit,
+      }
+    } catch (err: any) {
+      if (err.response?.status === 429) {
+        return {
+          status: 429,
+          message: err.response?.data?.data?.message || 'too many requests',
+          decision: err.response?.data?.data?.rate_limit,
+        }
+      }
+      return {
+        status: err.response?.status || 500,
+        message:
+          err.response?.data?.message ||
+          err.response?.data?.data?.message ||
+          err.message ||
+          'Request failed',
       }
     }
   },

@@ -1,12 +1,18 @@
 import React from 'react'
-import { Metrics } from '../types'
-import { BarChart3, CheckCircle2, XCircle, Database, Gauge } from 'lucide-react'
+import { Metrics, RateLimitStats } from '../types'
+import { BarChart3, CheckCircle2, XCircle, Database, Gauge, ShieldAlert } from 'lucide-react'
 
 interface MetricsPanelProps {
   metrics: Metrics
+  rateLimitStats?: RateLimitStats
+  isRateLimitScenario?: boolean
 }
 
-export const MetricsPanel: React.FC<MetricsPanelProps> = ({ metrics }) => {
+export const MetricsPanel: React.FC<MetricsPanelProps> = ({
+  metrics,
+  rateLimitStats,
+  isRateLimitScenario,
+}) => {
   const hitRatio =
     metrics.requests > 0
       ? Math.round((metrics.cache_hits / metrics.requests) * 100)
@@ -39,8 +45,14 @@ export const MetricsPanel: React.FC<MetricsPanelProps> = ({ metrics }) => {
         </div>
       </div>
 
-      {/* 4 Large Metrics Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      {/* Metrics Cards Grid */}
+      <div
+        className={`grid gap-3 ${
+          isRateLimitScenario || (rateLimitStats && rateLimitStats.blockedCount > 0)
+            ? 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-5'
+            : 'grid-cols-2 lg:grid-cols-4'
+        }`}
+      >
         {/* Total Requests */}
         <div className="bg-canvas rounded-lg border border-hairline p-3.5 space-y-1">
           <div className="flex items-center justify-between text-muted text-xs font-mono">
@@ -88,6 +100,26 @@ export const MetricsPanel: React.FC<MetricsPanelProps> = ({ metrics }) => {
           </div>
           <div className="text-[11px] text-muted">MySQL SELECT executed</div>
         </div>
+
+        {/* Rate Limit Blocked (429) Card */}
+        {(isRateLimitScenario || (rateLimitStats && rateLimitStats.blockedCount > 0)) && (
+          <div
+            className={`bg-canvas rounded-lg border p-3.5 space-y-1 transition-all ${
+              (rateLimitStats?.blockedCount || 0) > 0
+                ? 'border-error/40 ring-1 ring-error/20'
+                : 'border-hairline'
+            }`}
+          >
+            <div className="flex items-center justify-between text-error text-xs font-mono">
+              <span>429 Blocked</span>
+              <ShieldAlert className="w-3.5 h-3.5" />
+            </div>
+            <div className="text-2xl font-serif font-medium text-error">
+              {rateLimitStats?.blockedCount || 0}
+            </div>
+            <div className="text-[11px] text-muted">Too Many Requests</div>
+          </div>
+        )}
       </div>
     </div>
   )

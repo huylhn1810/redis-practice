@@ -4,13 +4,16 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 )
 
 type Config struct {
-	Database Database
-	Redis    Redis
-	Server   Server
+	Database  Database
+	Redis     Redis
+	RateLimit RateLimit
+	Server    Server
 }
 
 type Database struct {
@@ -45,14 +48,20 @@ type Server struct {
 	Port string
 }
 
+type RateLimit struct {
+	MaxRequests int
+	Window      time.Duration
+}
+
 func Load() (Config, error) {
 	database, databaseErr := loadDatabase()
 	redis, redisErr := loadRedis()
+	rateLimit, rateLimitErr := loadRateLimit()
 	server, serverErr := loadServer()
-	if err := errors.Join(databaseErr, redisErr, serverErr); err != nil {
+	if err := errors.Join(databaseErr, redisErr, rateLimitErr, serverErr); err != nil {
 		return Config{}, err
 	}
-	return Config{Database: database, Redis: redis, Server: server}, nil
+	return Config{Database: database, Redis: redis, RateLimit: rateLimit, Server: server}, nil
 }
 
 func loadDatabase() (Database, error) {
@@ -76,6 +85,18 @@ func loadRedis() (Redis, error) {
 	return Redis{Host: host, Port: port}, nil
 }
 
+func loadRateLimit() (RateLimit, error) {
+	maxRequests, maxRequestsErr := positiveIntEnv("MAX_REQUESTS", 10)
+	windowSeconds, windowSecondsErr := positiveIntEnv("WINDOW_SECONDS", 10)
+	if err := errors.Join(maxRequestsErr, windowSecondsErr); err != nil {
+		return RateLimit{}, err
+	}
+	return RateLimit{
+		MaxRequests: maxRequests,
+		Window:      time.Duration(windowSeconds) * time.Second,
+	}, nil
+}
+
 func loadServer() (Server, error) {
 	port, err := required("SERVER_PORT")
 	if err != nil {
@@ -88,6 +109,32 @@ func required(key string) (string, error) {
 	value := strings.TrimSpace(os.Getenv(key))
 	if value == "" {
 		return "", fmt.Errorf("%s is required", key)
+	}
+	return value, nil
+}
+
+func atoiEnv(key string, defaultValue int) (int, error) {
+	value := strings.TrimSpace(os.Getenv(key))
+
+	if value == "" {
+		return defaultValue, nil
+	}
+
+	n, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be an integer: %w", key, err)
+	}
+
+	return n, nil
+}
+
+func positiveIntEnv(key string, defaultValue int) (int, error) {
+	value, err := atoiEnv(key, defaultValue)
+	if err != nil {
+		return 0, err
+	}
+	if value <= 0 {
+		return 0, fmt.Errorf("%s must be greater than 0", key)
 	}
 	return value, nil
 }

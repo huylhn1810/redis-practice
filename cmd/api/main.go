@@ -16,6 +16,7 @@ import (
 	"github.com/huylhn1810/redis-practice/internal/controller"
 	"github.com/huylhn1810/redis-practice/internal/demo"
 	"github.com/huylhn1810/redis-practice/internal/events"
+	"github.com/huylhn1810/redis-practice/internal/middleware"
 	"github.com/huylhn1810/redis-practice/internal/repository"
 	"github.com/huylhn1810/redis-practice/internal/service"
 	"github.com/redis/go-redis/v9"
@@ -57,14 +58,28 @@ func run() error {
 	mysqlRepository := repository.NewProductRepository(database)
 	slowRepository := demo.NewSlowRepository(mysqlRepository, 300*time.Millisecond)
 	productCache := cache.NewProductCache(redisClient)
+	rateLimiter, err := cache.NewRedisRateLimiter(
+		redisClient,
+		cfg.RateLimit.MaxRequests,
+		cfg.RateLimit.Window,
+	)
+	if err != nil {
+		return fmt.Errorf("create Redis rate limiter: %w", err)
+	}
 	coalescer := appconcurrency.NewSingleFlight()
 	productService := service.NewProductService(slowRepository, productCache, scenarios, coalescer, telemetry)
 
+	rateLimitMiddleware := middleware.NewRateLimitMiddleware(rateLimiter)
 	productController := controller.NewProductController(productService)
 	cacheController := controller.NewCacheController(productCache, telemetry)
-	demoController := controller.NewDemoController(scenarios, telemetry)
+	demoController := controller.NewDemoController(
+		scenarios,
+		telemetry,
+		cfg.RateLimit.MaxRequests,
+		cfg.RateLimit.Window,
+	)
 	sseController := controller.NewSSEController(eventBroker)
-	router := controller.NewRouter(productController, cacheController, demoController, sseController)
+	router := controller.NewRouter(productController, cacheController, demoController, sseController, rateLimitMiddleware)
 
 	server := &http.Server{
 		Addr:              ":" + cfg.Server.Port,

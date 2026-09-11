@@ -1,6 +1,16 @@
 import React, { useState } from 'react'
-import { Product } from '../types'
-import { Database, Server, AlertTriangle, CheckCircle, HelpCircle, HardDrive, Table, Eye } from 'lucide-react'
+import { Product, RateLimitStats } from '../types'
+import {
+  Database,
+  Server,
+  AlertTriangle,
+  CheckCircle,
+  HelpCircle,
+  HardDrive,
+  Table,
+  Eye,
+  ShieldAlert,
+} from 'lucide-react'
 
 interface ProductStateProps {
   dbProduct: Product | null | undefined
@@ -10,6 +20,8 @@ interface ProductStateProps {
   productId: number
   isLoading?: boolean
   onSelectProduct?: (id: number) => void
+  isRateLimitScenario?: boolean
+  rateLimitStats?: RateLimitStats
 }
 
 export const ProductState: React.FC<ProductStateProps> = ({
@@ -20,6 +32,8 @@ export const ProductState: React.FC<ProductStateProps> = ({
   productId,
   isLoading,
   onSelectProduct,
+  isRateLimitScenario,
+  rateLimitStats,
 }) => {
   const [viewMode, setViewMode] = useState<'focused' | 'all'>('focused')
 
@@ -126,6 +140,65 @@ export const ProductState: React.FC<ProductStateProps> = ({
               )}
             </div>
           </div>
+
+          {/* Rate Limiting Active Banner / Inspector */}
+          {isRateLimitScenario && (
+            <div className="p-3 bg-surface-soft rounded-lg border border-hairline/80 space-y-2 font-mono text-xs">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <ShieldAlert className="w-4 h-4 text-primary" />
+                  <span className="font-semibold text-ink uppercase tracking-wider">
+                    Rate Limit Inspector (Redis Sliding Window)
+                  </span>
+                </div>
+                <span
+                  className={`px-2 py-0.5 rounded text-[11px] font-bold ${
+                    rateLimitStats?.lastStatus === 429
+                      ? 'bg-error/20 text-error border border-error/40 animate-pulse'
+                      : rateLimitStats?.lastStatus === 200
+                      ? 'bg-success/20 text-success border border-success/40'
+                      : 'bg-canvas text-muted border border-hairline'
+                  }`}
+                >
+                  {rateLimitStats?.lastStatus === 429
+                    ? '429 TOO MANY REQUESTS'
+                    : rateLimitStats?.lastStatus === 200
+                    ? '200 WITHIN LIMIT'
+                    : 'STANDBY'}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-[11px]">
+                <div className="bg-canvas p-2 rounded border border-hairline/60">
+                  <div className="text-muted">Client ID:</div>
+                  <div className="font-semibold text-ink truncate">{rateLimitStats?.clientIP || '192.168.1.10'}</div>
+                </div>
+                <div className="bg-canvas p-2 rounded border border-hairline/60">
+                  <div className="text-muted">Window Quota:</div>
+                  <div className="font-semibold text-ink">
+                    {rateLimitStats?.windowLimit ?? 0} req / {rateLimitStats?.windowSeconds ?? 0}s
+                  </div>
+                </div>
+                <div className="bg-canvas p-2 rounded border border-hairline/60">
+                  <div className="text-muted">Current Load:</div>
+                  <div
+                    className={`font-semibold ${
+                      (rateLimitStats?.currentLoad || 0) >= (rateLimitStats?.windowLimit || 1) * 0.95
+                        ? 'text-error'
+                        : (rateLimitStats?.currentLoad || 0) >= (rateLimitStats?.windowLimit || 1) * 0.65
+                        ? 'text-accent-amber'
+                        : 'text-primary'
+                    }`}
+                  >
+                    {(rateLimitStats?.currentLoad ?? rateLimitStats?.recentRequests ?? 0).toFixed(1)} / {rateLimitStats?.windowLimit ?? 0}
+                  </div>
+                </div>
+                <div className="bg-canvas p-2 rounded border border-hairline/60">
+                  <div className="text-muted">Algorithm:</div>
+                  <div className="font-semibold text-accent-teal">Sliding Window Lua</div>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Side-by-Side Cards: MySQL vs Redis for target product */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

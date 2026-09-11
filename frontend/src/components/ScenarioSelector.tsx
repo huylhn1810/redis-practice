@@ -1,6 +1,6 @@
 import React from 'react'
 import { ScenarioId, ScenarioMode, BackendConfig } from '../types'
-import { Layers, RefreshCw, Clock, ShieldAlert, Zap } from 'lucide-react'
+import { Layers, RefreshCw, Clock, ShieldAlert, Zap, Gauge } from 'lucide-react'
 
 interface ScenarioSelectorProps {
   currentScenario: ScenarioId
@@ -53,6 +53,13 @@ const SCENARIOS: {
     icon: Zap,
     hasBeforeAfter: true,
   },
+  {
+    id: 'rate-limit',
+    title: 'Rate Limiting',
+    subtitle: 'Sliding Window (Real-IP)',
+    icon: Gauge,
+    hasBeforeAfter: false,
+  },
 ]
 
 export const ScenarioSelector: React.FC<ScenarioSelectorProps> = ({
@@ -103,8 +110,8 @@ export const ScenarioSelector: React.FC<ScenarioSelectorProps> = ({
           )}
         </div>
 
-        {/* 5 Scenario Buttons */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+        {/* 6 Scenario Buttons */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
           {SCENARIOS.map((scenario) => {
             const isSelected = scenario.id === currentScenario
             const Icon = scenario.icon
@@ -150,6 +157,14 @@ export const ScenarioSelector: React.FC<ScenarioSelectorProps> = ({
           <span className="text-muted text-[11px]">Backend Configuration:</span>
 
           <div className="flex flex-wrap items-center gap-3">
+            {/* Rate Limiting */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-muted">Rate Limiter:</span>
+              <span className="px-1.5 py-0.5 rounded text-[11px] font-medium bg-primary/15 text-primary">
+                {config.rate_limit_max_requests} req / {config.rate_limit_window_seconds}s (X-Demo-Client-ID)
+              </span>
+            </div>
+
             {/* TTL */}
             <div className="flex items-center gap-1.5">
               <span className="text-muted">TTL:</span>

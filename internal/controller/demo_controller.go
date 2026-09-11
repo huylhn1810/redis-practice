@@ -2,8 +2,10 @@ package controller
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/huylhn1810/redis-practice/internal/middleware"
 	"github.com/huylhn1810/redis-practice/internal/service"
 )
 
@@ -22,12 +24,24 @@ type Metrics interface {
 }
 
 type DemoController struct {
-	scenarios ScenarioManager
-	metrics   Metrics
+	scenarios            ScenarioManager
+	metrics              Metrics
+	rateLimitMaxRequests int
+	rateLimitWindow      time.Duration
 }
 
-func NewDemoController(scenarios ScenarioManager, metrics Metrics) *DemoController {
-	return &DemoController{scenarios: scenarios, metrics: metrics}
+func NewDemoController(
+	scenarios ScenarioManager,
+	metrics Metrics,
+	rateLimitMaxRequests int,
+	rateLimitWindow time.Duration,
+) *DemoController {
+	return &DemoController{
+		scenarios:            scenarios,
+		metrics:              metrics,
+		rateLimitMaxRequests: rateLimitMaxRequests,
+		rateLimitWindow:      rateLimitWindow,
+	}
 }
 
 type scenarioRequest struct {
@@ -65,10 +79,21 @@ func (c *DemoController) GetMetrics(ctx *gin.Context) {
 func (c *DemoController) GetConfig(ctx *gin.Context) {
 	policy := c.scenarios.Current()
 	respond(ctx, http.StatusOK, gin.H{"config": gin.H{
-		"cache_ttl":           policy.TTL,
-		"negative_cache_ttl":  policy.NegativeCacheTTL,
-		"negative_cache":      policy.NegativeCaching,
-		"invalidation_update": policy.InvalidateOnUpdate,
-		"stampede_protection": policy.StampedeProtection,
+		"cache_ttl":                 policy.TTL,
+		"negative_cache_ttl":        policy.NegativeCacheTTL,
+		"negative_cache":            policy.NegativeCaching,
+		"invalidation_update":       policy.InvalidateOnUpdate,
+		"stampede_protection":       policy.StampedeProtection,
+		"rate_limit_max_requests":   c.rateLimitMaxRequests,
+		"rate_limit_window_seconds": int(c.rateLimitWindow / time.Second),
 	}})
+}
+
+func (c *DemoController) RateLimitProbe(ctx *gin.Context) {
+	decision, ok := middleware.DecisionFromContext(ctx)
+	if !ok {
+		respond(ctx, http.StatusInternalServerError, gin.H{"message": "rate limit decision unavailable"})
+		return
+	}
+	respond(ctx, http.StatusOK, gin.H{"rate_limit": decision})
 }

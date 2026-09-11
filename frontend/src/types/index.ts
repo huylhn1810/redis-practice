@@ -19,6 +19,8 @@ export interface BackendConfig {
   negative_cache: boolean
   invalidation_update: boolean
   stampede_protection: boolean
+  rate_limit_max_requests: number
+  rate_limit_window_seconds: number
 }
 
 export type ScenarioId =
@@ -27,14 +29,44 @@ export type ScenarioId =
   | 'ttl'
   | 'negative-caching'
   | 'cache-stampede'
+  | 'rate-limit'
 
 export type ScenarioMode = 'before' | 'after'
+
+export interface RateLimitDecision {
+  allowed: boolean
+  limit: number
+  used: number
+  remaining: number
+  window_seconds: number
+  reset_after_seconds: number
+  retry_after_seconds: number
+}
+
+export interface RateLimitProbeResult {
+  status: number
+  message: string
+  decision?: RateLimitDecision
+}
+
+export interface RateLimitStats {
+  clientIP: string
+  allowedCount: number
+  blockedCount: number
+  recentRequests: number
+  currentLoad: number
+  cooldownRemaining: number
+  windowLimit: number
+  windowSeconds: number
+  lastStatus: 200 | 429 | null
+  lastMessage?: string
+}
 
 export interface EventLogItem {
   id: string
   timestamp: string
   badge: string
-  badgeType: 'hit' | 'miss' | 'db' | 'set' | 'delete' | 'error' | 'info'
+  badgeType: 'hit' | 'miss' | 'db' | 'set' | 'delete' | 'error' | 'info' | 'ratelimit' | 'blocked'
   message: string
   source?: 'sse' | 'client'
 }

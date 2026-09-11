@@ -45,6 +45,10 @@ export const EventLog: React.FC<EventLogProps> = ({
         return 'bg-accent-teal/20 text-accent-teal border-accent-teal/30'
       case 'error':
         return 'bg-error/20 text-error border-error/30'
+      case 'blocked':
+        return 'bg-error/30 text-error border-error/50 font-bold'
+      case 'ratelimit':
+        return 'bg-primary/20 text-primary border-primary/30'
       default:
         return 'bg-surface-dark-elevated text-on-dark-soft border-hairline/20'
     }

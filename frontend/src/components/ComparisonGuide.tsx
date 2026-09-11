@@ -103,6 +103,25 @@ const GUIDES: Record<ScenarioId, GuideContent> = {
       '3. The other 99 requests wait for the first result and share it (DB Queries = ~1!) (✓ PROTECTED)',
     ],
   },
+  'rate-limit': {
+    title: 'Rate Limiting (Redis Sliding Window)',
+    problemTitle: 'BEFORE: Unprotected API & Denial of Service',
+    problemDesc:
+      'Without rate limiting, aggressive clients, bots, or accidental infinite loops can spam the API with hundreds of requests, overwhelming MySQL and the application server.',
+    problemSteps: [
+      '1. Client spams unlimited requests to /api/v1/products',
+      '2. Every request passes through to query DB or cache without restriction',
+      '3. Server CPU maxes out and connection pools starve, causing downtime (⚠ DoS Vulnerability)',
+    ],
+    solutionTitle: 'AFTER: Sliding Window Counter via Redis Lua',
+    solutionDesc:
+      'Redis tracks requests per simulated client (X-Demo-Client-ID) using an atomic Lua script with a weighted sliding window formula: estimated = prev * (1 - ratio) + current.',
+    solutionSteps: [
+      '1. Requests within the configured quota are allowed (HTTP 200 OK)',
+      '2. A request over the estimated quota is blocked (HTTP 429 Too Many Requests)',
+      '3. Client Isolation: Client B is unaffected even when Client A is throttled! (✓ ISOLATED & PROTECTED)',
+    ],
+  },
 }
 
 export const ComparisonGuide: React.FC<ComparisonGuideProps> = ({
@@ -124,7 +143,7 @@ export const ComparisonGuide: React.FC<ComparisonGuideProps> = ({
         {/* Left: Problem Card */}
         <div
           className={`rounded-lg border p-4 transition-all ${
-            mode === 'before'
+            scenario === 'rate-limit' || scenario === 'cache-aside' || mode === 'before'
               ? 'bg-canvas border-accent-amber/50 shadow-sm ring-1 ring-accent-amber/20'
               : 'bg-canvas/60 border-hairline/60 opacity-80'
           }`}
@@ -146,7 +165,7 @@ export const ComparisonGuide: React.FC<ComparisonGuideProps> = ({
         {/* Right: Solution Card */}
         <div
           className={`rounded-lg border p-4 transition-all ${
-            mode === 'after'
+            scenario === 'rate-limit' || scenario === 'cache-aside' || mode === 'after'
               ? 'bg-canvas border-success/50 shadow-sm ring-1 ring-success/20'
               : 'bg-canvas/60 border-hairline/60 opacity-80'
           }`}

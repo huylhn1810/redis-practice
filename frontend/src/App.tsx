@@ -14,6 +14,7 @@ import {
   BackendConfig,
   Product,
   EventLogItem,
+  RateLimitStats,
 } from './types'
 
 function formatTimestamp(): string {
@@ -25,6 +26,24 @@ export const App: React.FC = () => {
   // Scenario State
   const [scenario, setScenario] = useState<ScenarioId>('cache-aside')
   const [mode, setMode] = useState<ScenarioMode>('before')
+
+  // Rate Limiting State
+  const [clientIP, setClientIP] = useState<string>('192.168.1.10')
+  const [rateLimitStats, setRateLimitStats] = useState<RateLimitStats>({
+    clientIP: '192.168.1.10',
+    allowedCount: 0,
+    blockedCount: 0,
+    recentRequests: 0,
+    currentLoad: 0,
+    cooldownRemaining: 0,
+    windowLimit: 10,
+    windowSeconds: 10,
+    lastStatus: null,
+    lastMessage: undefined,
+  })
+
+  // The latest backend decision is kept per simulated client.
+  const rateLimitStatsByClientRef = useRef<Record<string, RateLimitStats>>({})
 
   // Data & Backend State
   const [metrics, setMetrics] = useState<Metrics>({
@@ -40,6 +59,8 @@ export const App: React.FC = () => {
     negative_cache: false,
     invalidation_update: false,
     stampede_protection: false,
+    rate_limit_max_requests: 10,
+    rate_limit_window_seconds: 10,
   })
   const [dbProduct, setDbProduct] = useState<Product | null>(null)
   const [redisProduct, setRedisProduct] = useState<any | null>(null)
@@ -92,6 +113,11 @@ export const App: React.FC = () => {
       const [m, cfg] = await Promise.all([api.getMetrics(), api.getConfig()])
       setMetrics(m)
       setConfig(cfg)
+      setRateLimitStats((previous) => ({
+        ...previous,
+        windowLimit: cfg.rate_limit_max_requests,
+        windowSeconds: cfg.rate_limit_window_seconds,
+      }))
 
       // 2. Fetch MySQL Database state
       const allDb = await api.getAllProducts()
@@ -180,6 +206,8 @@ export const App: React.FC = () => {
         return md === 'before' ? 'negative-before' : 'negative-after'
       case 'cache-stampede':
         return md === 'before' ? 'stampede-before' : 'stampede-after'
+      case 'rate-limit':
+        return 'stale-before' // Safe fallback for demo scenario store
     }
   }
 
@@ -189,8 +217,16 @@ export const App: React.FC = () => {
     const key = getBackendScenarioKey(newScenario, newMode)
     setIsLoading(true)
     try {
-      await api.setScenario(key)
-      addLog('SCENARIO', 'info', `Switched scenario to [${newScenario}] -> mode [${newMode}] (Key: ${key})`)
+      if (newScenario === 'rate-limit') {
+        addLog(
+          'SCENARIO',
+          'info',
+          `Switched scenario to [Rate Limiting] (Redis sliding-window counter)`
+        )
+      } else {
+        await api.setScenario(key)
+        addLog('SCENARIO', 'info', `Switched scenario to [${newScenario}] -> mode [${newMode}] (Key: ${key})`)
+      }
       await refreshData(targetId)
     } catch (err: any) {
       addLog('ERROR', 'error', `Failed to set scenario: ${err.message}`)
@@ -205,11 +241,96 @@ export const App: React.FC = () => {
     const key = getBackendScenarioKey(scenario, newMode)
     setIsLoading(true)
     try {
-      await api.setScenario(key)
-      addLog('MODE', 'info', `Switched mode to [${newMode.toUpperCase()}] for ${scenario} (Key: ${key})`)
+      if (scenario !== 'rate-limit') {
+        await api.setScenario(key)
+      }
+      addLog('MODE', 'info', `Switched mode to [${newMode.toUpperCase()}] for ${scenario}`)
       await refreshData(targetId)
     } catch (err: any) {
       addLog('ERROR', 'error', `Failed to set mode: ${err.message}`)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  // Action: Test Rate Limiter with a simulated client ID
+  const handleTestRateLimit = async (ip: string, count: number = 1) => {
+    if (isLoading) return
+    setIsLoading(true)
+    setClientIP(ip)
+    addLog(
+      'RATE LIMIT',
+      'info',
+      `Sending ${count} request(s) with X-Demo-Client-ID: ${ip} to POST /api/v1/demo/ratelimit...`
+    )
+
+    let allowed = 0
+    let blocked = 0
+
+    try {
+      const requests = Array.from({ length: count }, () => api.sendRateLimitProbe(ip))
+      const results = await Promise.all(requests)
+
+      results.forEach((res, i) => {
+        if (res.status === 429) {
+          blocked++
+          addLog(
+            '429 BLOCKED',
+            'blocked',
+            `[Req #${i + 1}] IP ${ip} exceeded limit: ${res.message || 'too many requests'}`
+          )
+        } else if (res.status >= 200 && res.status < 300) {
+          allowed++
+          addLog(
+            '200 OK',
+            'hit',
+            `[Req #${i + 1}] IP ${ip} allowed by Redis sliding window`
+          )
+        } else {
+          addLog(
+            `HTTP ${res.status}`,
+            'error',
+            `[Req #${i + 1}] IP ${ip} response: ${res.message}`
+          )
+        }
+      })
+
+      const previous = rateLimitStatsByClientRef.current[ip]
+      const hadBlocked = blocked > 0
+      const decision = results
+        .filter((result) => !hadBlocked || result.status === 429)
+        .flatMap((result) => (result.decision ? [result.decision] : []))
+        .sort(
+          (left, right) =>
+            right.used - left.used || right.retry_after_seconds - left.retry_after_seconds
+        )[0]
+
+      if (!decision) {
+        throw new Error('Backend did not return a rate-limit decision')
+      }
+
+      const nextStats: RateLimitStats = {
+        clientIP: ip,
+        allowedCount: (previous?.allowedCount ?? 0) + allowed,
+        blockedCount: (previous?.blockedCount ?? 0) + blocked,
+        recentRequests: decision.used,
+        currentLoad: decision.used,
+        cooldownRemaining: hadBlocked
+          ? decision.retry_after_seconds
+          : decision.reset_after_seconds,
+        windowLimit: decision.limit,
+        windowSeconds: decision.window_seconds,
+        lastStatus: hadBlocked ? 429 : 200,
+        lastMessage: hadBlocked
+          ? `HTTP 429: retry after ${decision.retry_after_seconds}s (${decision.used}/${decision.limit} used)`
+          : `HTTP 200: ${decision.remaining}/${decision.limit} requests remaining`,
+      }
+      rateLimitStatsByClientRef.current[ip] = nextStats
+      setRateLimitStats(nextStats)
+
+      await refreshData(targetId)
+    } catch (err: any) {
+      addLog('ERROR', 'error', `Rate limit test failed: ${err.message}`)
     } finally {
       setIsLoading(false)
     }
@@ -273,7 +394,18 @@ export const App: React.FC = () => {
     addLog('REQUEST', 'info', 'DELETE /api/v1/cache (FLUSHDB)')
     try {
       await api.clearCache()
-      addLog('FLUSH CACHE', 'delete', 'Redis cache flushed completely')
+      addLog('FLUSH CACHE', 'delete', 'Redis cache flushed completely (Rate limit counters reset)')
+      rateLimitStatsByClientRef.current = {}
+      setRateLimitStats((prev) => ({
+        ...prev,
+        recentRequests: 0,
+        currentLoad: 0,
+        cooldownRemaining: 0,
+        allowedCount: 0,
+        blockedCount: 0,
+        lastStatus: null,
+        lastMessage: 'Redis flushed: all rate limit counters reset to 0',
+      }))
       await refreshData(targetId)
     } catch (err: any) {
       addLog('ERROR', 'error', `Clear cache failed: ${err.message}`)
@@ -391,7 +523,7 @@ export const App: React.FC = () => {
       await api.resetDemo()
       setScenario('cache-aside')
       setMode('before')
-      addLog('RESET OK', 'info', 'Environment reset: Metrics set to 0, default config restored')
+      addLog('RESET OK', 'info', 'Default scenario restored and metrics reset')
       await refreshData(1)
     } catch (err: any) {
       addLog('ERROR', 'error', `Reset failed: ${err.message}`)
@@ -432,12 +564,18 @@ export const App: React.FC = () => {
             allCacheItems={allCacheItems}
             productId={targetId}
             isLoading={isLoading}
+            isRateLimitScenario={scenario === 'rate-limit'}
+            rateLimitStats={rateLimitStats}
             onSelectProduct={(id) => {
               setTargetId(id)
               refreshData(id)
             }}
           />
-          <MetricsPanel metrics={metrics} />
+          <MetricsPanel
+            metrics={metrics}
+            isRateLimitScenario={scenario === 'rate-limit'}
+            rateLimitStats={rateLimitStats}
+          />
         </div>
 
         {/* Row 3: Action Panel */}
@@ -452,6 +590,26 @@ export const App: React.FC = () => {
           onSeedProduct={handleSeedProduct}
           onClearDatabase={handleClearDatabase}
           isLoading={isLoading}
+          rateLimitStats={rateLimitStats}
+          onTestRateLimit={handleTestRateLimit}
+          currentClientIP={clientIP}
+          onChangeClientIP={(ip) => {
+            setClientIP(ip)
+            setRateLimitStats(
+              rateLimitStatsByClientRef.current[ip] || {
+                clientIP: ip,
+                allowedCount: 0,
+                blockedCount: 0,
+                recentRequests: 0,
+                currentLoad: 0,
+                cooldownRemaining: 0,
+                windowLimit: config.rate_limit_max_requests,
+                windowSeconds: config.rate_limit_window_seconds,
+                lastStatus: null,
+                lastMessage: `Active client switched to ${ip}`,
+              }
+            )
+          }}
         />
 
         {/* Row 4: Event Log (Dark Obsidian Surface) */}

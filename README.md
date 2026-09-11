@@ -20,6 +20,7 @@ A hands-on project for exploring common Redis caching scenarios in a backend app
 | TTL | Compare keys without expiration against keys that expire after 30 seconds |
 | Negative Caching | Cache `NOT FOUND` results briefly to reduce repeated queries for missing IDs |
 | Cache Stampede | Observe concurrent requests and how SingleFlight reduces duplicate MySQL queries |
+| Rate Limiting | Use an atomic Redis Lua script to enforce a weighted sliding-window quota per client |
 
 ## Tech Stack
 
@@ -82,6 +83,7 @@ The backend publishes events such as `CACHE HIT`, `CACHE MISS`, `CACHE SET`, and
 ├── config/                  Environment configuration
 ├── internal/
 │   ├── controller/          HTTP handlers and routes
+│   ├── middleware/          HTTP rate-limit enforcement
 │   ├── service/             Product and caching workflows
 │   ├── repository/          MySQL access
 │   ├── cache/               Redis access
@@ -200,6 +202,7 @@ For updates, the backend uses the `:id` URL parameter. The `id` field is not req
 | `GET` | `/api/v1/demo/metrics` | Retrieve cache and database metrics |
 | `GET` | `/api/v1/demo/events` | Receive the SSE event stream |
 | `POST` | `/api/v1/demo/stampede` | Run 100 concurrent goroutines |
+| `POST` | `/api/v1/demo/ratelimit` | Probe the Redis-backed rate limiter |
 
 Supported backend scenario keys:
 
@@ -221,6 +224,15 @@ curl -X POST http://localhost:8080/api/v1/demo/scenario \
   -H "Content-Type: application/json" \
   -d '{"scenario":"ttl-after"}'
 ```
+
+Example rate-limit probe:
+
+```bash
+curl -i -X POST http://localhost:8080/api/v1/demo/ratelimit \
+  -H "X-Demo-Client-ID: client-a"
+```
+
+The response contains the estimated request count, remaining quota, and reset timing. When the quota is exceeded, the endpoint returns `429 Too Many Requests` with a `Retry-After` header. `MAX_REQUESTS` and `WINDOW_SECONDS` in `.env` control the policy.
 
 ## Stopping the Application
 
@@ -254,3 +266,4 @@ The project currently focuses on Redis practice and does not include automated t
 - Negative caching uses a short TTL so that `NOT FOUND` entries do not remain indefinitely.
 - Redis read failures fall back to MySQL, allowing read requests to continue when the cache is unavailable.
 - SingleFlight only coalesces requests inside one backend process; it is not a distributed lock across multiple instances.
+- The rate-limit endpoint uses `X-Demo-Client-ID` only to make client isolation easy to experiment with. A production API should derive a trusted identity from authentication or a correctly configured reverse proxy.
